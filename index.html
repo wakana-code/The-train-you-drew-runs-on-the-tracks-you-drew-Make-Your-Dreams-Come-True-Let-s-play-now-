@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>お絵かきトレイン - 生きた落書きVer.</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+            background-color: #fdfbf7; /* 画用紙っぽい色 */
+            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif; /* 手書き風フォント */
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        canvas {
+            display: block;
+            touch-action: none;
+        }
+        .ui-panel {
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 2px 2px 0px rgba(0,0,0,0.1);
+            border: 2px solid #333;
+            border-radius: 12px;
+        }
+        .tool-btn {
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+        .tool-btn.active {
+            background-color: #fbbf24;
+            color: #333;
+            border: 2px solid #333;
+            transform: translateY(-4px);
+            box-shadow: 2px 4px 0px rgba(0,0,0,0.2);
+        }
+        .save-btn {
+            background-color: #fff;
+            color: #333;
+            border: 2px solid #333;
+            transition: all 0.1s;
+        }
+        .save-btn:active {
+            transform: translate(2px, 2px);
+            box-shadow: none;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- 保存メニュー -->
+    <div class="fixed top-4 right-4 flex gap-2 z-50">
+        <button onclick="saveData()" class="save-btn px-4 py-2 rounded-lg font-bold text-sm shadow-[2px_2px_0px_rgba(0,0,0,0.2)] flex items-center gap-2">
+            <i class="fas fa-save"></i> 保存
+        </button>
+        <button onclick="loadData()" class="save-btn px-4 py-2 rounded-lg font-bold text-sm shadow-[2px_2px_0px_rgba(0,0,0,0.2)] flex items-center gap-2">
+            <i class="fas fa-folder-open"></i> 読込
+        </button>
+    </div>
+
+    <!-- ツールバー -->
+    <div class="fixed bottom-6 left-1/2 transform -translate-x-1/2 ui-panel px-4 py-3 flex gap-3 z-50 items-center">
+        <button id="btn-rail" class="tool-btn active flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-gray-100 text-slate-600" onclick="setMode('rail')">
+            <i class="fas fa-train-track text-xl"></i>
+            <span class="text-[9px] font-bold mt-1">線路</span>
+        </button>
+        <button id="btn-station" class="tool-btn flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-gray-100 text-slate-600" onclick="setMode('station')">
+            <i class="fas fa-building text-xl"></i>
+            <span class="text-[9px] font-bold mt-1">駅</span>
+        </button>
+        <button id="btn-crossing" class="tool-btn flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-gray-100 text-slate-600" onclick="setMode('crossing')">
+            <i class="fas fa-traffic-light text-xl"></i>
+            <span class="text-[9px] font-bold mt-1">踏切</span>
+        </button>
+        <button id="btn-train" class="tool-btn flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-gray-100 text-slate-600" onclick="setMode('train')">
+            <i class="fas fa-subway text-xl"></i>
+            <span class="text-[9px] font-bold mt-1">電車</span>
+        </button>
+        <button id="btn-person" class="tool-btn flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-gray-100 text-slate-600" onclick="setMode('person')">
+            <i class="fas fa-person text-xl"></i>
+            <span class="text-[9px] font-bold mt-1">人</span>
+        </button>
+        <div class="w-px h-8 bg-slate-300 mx-1"></div>
+        <button class="tool-btn flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 border-red-200" onclick="clearAll()">
+            <i class="fas fa-trash-alt text-xl"></i>
+            <span class="text-[9px] font-bold mt-1">消す</span>
+        </button>
+    </div>
+
+    <!-- ガイド -->
+    <div id="guide-msg" class="fixed top-6 left-1/2 transform -translate-x-1/2 ui-panel px-6 py-3 text-center z-40 pointer-events-none transition-opacity duration-300">
+        <p class="text-sm font-bold text-slate-800 mb-1" id="guide-title">ようこそ！</p>
+        <p class="text-xs text-slate-600" id="guide-text">まずは「線路」ボタンを押して、画面に線を引いてみよう。<br>グルッと一周させると環状線になります。</p>
+    </div>
+
+    <!-- トースト -->
+    <div id="toast" class="fixed top-24 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm opacity-0 transition-opacity duration-300 pointer-events-none z-50">
+        保存しました
+    </div>
+
+    <!-- 音声有効化 -->
+    <div id="audio-enable" class="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center hidden backdrop-blur-sm">
+        <div class="bg-white p-6 rounded-xl text-center shadow-[4px_4px_0px_rgba(0,0,0,0.2)] border-2 border-black max-w-xs">
+            <div class="mb-4 text-4xl">📢</div>
+            <p class="mb-4 font-bold text-lg">音を鳴らしますか？</p>
+            <p class="mb-6 text-sm text-gray-600">踏切の音や発車ベルが鳴ります。</p>
+            <button onclick="enableAudio()" class="bg-yellow-400 text-black border-2 border-black px-6 py-2 rounded-full font-bold hover:bg-yellow-300 transition active:translate-y-1 shadow-[2px_2px_0px_rgba(0,0,0,1)]">OK, スタート！</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 設定と状態 ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        const MODES = { RAIL: 'rail', STATION: 'station', TRAIN: 'train', PERSON: 'person', CROSSING: 'crossing' };
+        let currentMode = MODES.RAIL;
+        let isDrawing = false;
+        let currentStroke = []; 
+
+        let rails = [];    
+        let stations = [];
+        let trains = [];
+        let people = [];   
+        let crossings = [];
+        let particles = []; // 煙エフェクト用
+
+        // 定数
+        const RAIL_WIDTH = 30;
+        const MAX_SPEED = 1.2;     // 最高速度
+        const ACCEL = 0.02;        // 加速度
+        const DECEL = 0.03;        // 減速度
+        const BOARDING_SPEED = 5;
+        const CROSSING_DETECT_DIST = 150; 
+        const LOOP_CONNECT_DIST = 40;
+        const DEPARTURE_DELAY = 60; // 全員乗車後の発車待ちフレーム数 (約1秒)
+
+        let audioCtx = null;
+        let isAudioEnabled = false;
+        let frameCount = 0;
+
+        // --- 初期化 ---
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        const audioOverlay = document.getElementById('audio-enable');
+        let hasInteracted = false;
+
+        function enableAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            isAudioEnabled = true;
+            audioOverlay.classList.add('hidden');
+        }
+
+        function checkAudioInit() {
+            if(!hasInteracted) {
+                hasInteracted = true;
+                audioOverlay.classList.remove('hidden');
+            }
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.classList.remove('opacity-0');
+            setTimeout(() => t.classList.add('opacity-0'), 2000);
+        }
+
+        // --- 保存 / 読込 ---
+        function saveData() {
+            const data = { rails, stations, trains, people, crossings };
+            try {
+                localStorage.setItem('magicTrainData_v3', JSON.stringify(data));
+                showToast('ノートに記録しました！');
+            } catch(e) {
+                alert('保存できませんでした');
+            }
+        }
+
+        function loadData() {
+            try {
+                const json = localStorage.getItem('magicTrainData_v3');
+                if(!json) {
+                    alert('記録がありません');
+                    return;
+                }
+                const data = JSON.parse(json);
+                rails = data.rails || [];
+                stations = data.stations || [];
+                trains = data.trains || [];
+                people = data.people || [];
+                crossings = data.crossings || [];
+                showToast('記録を開きました！');
+            } catch(e) {
+                alert('読み込みに失敗しました');
+            }
+        }
+
+        // --- ツール切り替え ---
+        function setMode(mode) {
+            currentMode = mode;
+            if(!hasInteracted) checkAudioInit();
+            
+            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(`btn-${mode}`).classList.add('active');
+
+            const title = document.getElementById('guide-title');
+            const text = document.getElementById('guide-text');
+            
+            switch(mode) {
+                case 'rail': title.innerText = "線路を引こう"; text.innerText = "始点と終点を繋げると環状線になります。"; break;
+                case 'station': title.innerText = "駅を描こう"; text.innerText = "ぐるっと囲むように駅を描いてみよう。"; break;
+                case 'train': title.innerText = "電車を描こう"; text.innerText = "線路の上で、好きな形の電車を描いてみよう！"; break;
+                case 'person': title.innerText = "乗客を増やそう"; text.innerText = "駅の中に人を描くと、電車に乗るよ！"; break;
+                case 'crossing': title.innerText = "踏切を作ろう"; text.innerText = "線路を横切るように線を引くと踏切になります。"; break;
+            }
+        }
+
+        function clearAll() {
+            if(confirm('ページを破って新しくしますか？')) {
+                rails = []; stations = []; trains = []; people = []; crossings = []; particles = [];
+                ctx.clearRect(0, 0, width, height);
+            }
+        }
+
+        // --- サウンド ---
+        function playSound(type) {
+            if (!isAudioEnabled || !audioCtx) return;
+            const t = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            if (type === 'crossing') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(700, t);
+                osc.frequency.exponentialRampToValueAtTime(600, t + 0.1);
+                gain.gain.setValueAtTime(0.05, t);
+                gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+            } else if (type === 'depart') {
+                // 発車ベル風 (プルルル)
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(800, t);
+                osc.frequency.linearRampToValueAtTime(800, t + 0.5);
+                // 簡易的なトレモロ
+                const lfo = audioCtx.createOscillator();
+                lfo.frequency.value = 15;
+                const lfoGain = audioCtx.createGain();
+                lfoGain.gain.value = 500;
+                lfo.connect(lfoGain);
+                // 複雑になるのでシンプルな音に変更
+                osc.frequency.setValueAtTime(600, t);
+                osc.frequency.linearRampToValueAtTime(1200, t + 0.2);
+                gain.gain.setValueAtTime(0.05, t);
+                gain.gain.linearRampToValueAtTime(0, t + 0.5);
+            }
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(t);
+            osc.stop(t + 0.6);
+        }
+
+        // --- 入力処理 ---
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        canvas.addEventListener('mousedown', startStroke);
+        canvas.addEventListener('touchstart', startStroke, {passive: false});
+        canvas.addEventListener('mousemove', drawStroke);
+        canvas.addEventListener('touchmove', drawStroke, {passive: false});
+        canvas.addEventListener('mouseup', endStroke);
+        canvas.addEventListener('touchend', endStroke);
+
+        function startStroke(e) {
+            e.preventDefault();
+            isDrawing = true;
+            currentStroke = [getPos(e)];
+            if(!hasInteracted) checkAudioInit();
+        }
+
+        function drawStroke(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            const pos = getPos(e);
+            const lastPos = currentStroke[currentStroke.length - 1];
+            if (Math.hypot(pos.x - lastPos.x, pos.y - lastPos.y) > 5) {
+                currentStroke.push(pos);
+            }
+        }
+
+        function endStroke(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+            if (currentStroke.length < 2) return;
+
+            switch (currentMode) {
+                case MODES.RAIL: createRail(currentStroke); break;
+                case MODES.STATION: createStation(currentStroke); break;
+                case MODES.TRAIN: createTrain(currentStroke); break;
+                case MODES.PERSON: createPerson(currentStroke); break;
+                case MODES.CROSSING: createCrossing(currentStroke); break;
+            }
+            currentStroke = [];
+        }
+
+        // --- 生成ロジック ---
+        function createRail(stroke) {
+            const first = stroke[0];
+            const last = stroke[stroke.length - 1];
+            const dist = Math.hypot(last.x - first.x, last.y - first.y);
+            
+            let isLoop = false;
+            let points = [...stroke];
+
+            if (dist < LOOP_CONNECT_DIST && points.length > 5) {
+                isLoop = true;
+                points.push({ x: first.x, y: first.y });
+                // スムージング用に少し重複させる
+                points.push(stroke[1]);
+            }
+            rails.push({ points, isLoop });
+        }
+
+        function createStation(stroke) {
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            stroke.forEach(p => {
+                minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+                maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+            });
+            if (maxX - minX < 20 || maxY - minY < 20) return;
+            stations.push({
+                x: minX, y: minY, w: maxX - minX, h: maxY - minY,
+                id: Date.now() + Math.random(),
+                points: [...stroke]
+            });
+        }
+
+        function createTrain(stroke) {
+            let cx = 0, cy = 0;
+            stroke.forEach(p => { cx += p.x; cy += p.y; });
+            cx /= stroke.length; cy /= stroke.length;
+
+            let bestRailIdx = -1, bestPointIdx = -1, minDst = 100;
+            rails.forEach((rail, rIdx) => {
+                rail.points.forEach((p, pIdx) => {
+                    const d = Math.hypot(p.x - cx, p.y - cy);
+                    if (d < minDst) { minDst = d; bestRailIdx = rIdx; bestPointIdx = pIdx; }
+                });
+            });
+
+            if (bestRailIdx !== -1) {
+                const rail = rails[bestRailIdx];
+                const p = rail.points[bestPointIdx];
+                
+                // 向き計算
+                const lookAhead = Math.min(bestPointIdx + 5, rail.points.length - 1);
+                const lookBehind = Math.max(bestPointIdx - 5, 0);
+                const nextP = rail.points[lookAhead];
+                const prevP = rail.points[lookBehind];
+                const railAngle = Math.atan2(nextP.y - prevP.y, nextP.x - prevP.x);
+
+                const shape = stroke.map(pt => {
+                    const dx = pt.x - cx; const dy = pt.y - cy;
+                    const cos = Math.cos(-railAngle); const sin = Math.sin(-railAngle);
+                    return { x: dx * cos - dy * sin, y: dx * sin + dy * cos };
+                });
+
+                trains.push({
+                    railIndex: bestRailIdx,
+                    progress: bestPointIdx,
+                    currentSpeed: 0,    // 現在速度
+                    targetSpeed: MAX_SPEED, // 目標速度
+                    direction: 1,
+                    color: `hsl(${Math.random() * 360}, 75%, 65%)`,
+                    stopped: false,
+                    departureTimer: 0,  // 発車待ちタイマー
+                    passengers: 0,
+                    shape: shape,
+                    randomOffset: Math.random() * 100 // アニメーションの位相ズレ用
+                });
+            }
+        }
+
+        function createPerson(stroke) {
+            let cx = 0, cy = 0;
+            stroke.forEach(p => { cx += p.x; cy += p.y; });
+            cx /= stroke.length; cy /= stroke.length;
+
+            let targetStationId = null;
+            for (let s of stations) {
+                if (cx >= s.x && cx <= s.x + s.w && cy >= s.y && cy <= s.y + s.h) {
+                    targetStationId = s.id; break;
+                }
+            }
+            if (targetStationId) {
+                people.push({
+                    x: cx, y: cy,
+                    targetStationId: targetStationId,
+                    boarding: false,
+                    targetTrain: null,
+                    color: '#333'
+                });
+            }
+        }
+
+        function createCrossing(stroke) {
+            let cx = 0, cy = 0;
+            stroke.forEach(p => { cx += p.x; cy += p.y; });
+            cx /= stroke.length; cy /= stroke.length;
+
+            let bestRailIdx = -1, bestPointIdx = -1, minDst = 50;
+            rails.forEach((rail, rIdx) => {
+                rail.points.forEach((p, pIdx) => {
+                    const d = Math.hypot(p.x - cx, p.y - cy);
+                    if (d < minDst) { minDst = d; bestRailIdx = rIdx; bestPointIdx = pIdx; }
+                });
+            });
+
+            if (bestRailIdx !== -1) {
+                const rail = rails[bestRailIdx];
+                const p = rail.points[bestPointIdx];
+                const nextP = rail.points[Math.min(bestPointIdx + 1, rail.points.length - 1)] || p;
+                const prevP = rail.points[Math.max(bestPointIdx - 1, 0)] || p;
+                const railAngle = Math.atan2(nextP.y - prevP.y, nextP.x - prevP.x);
+
+                crossings.push({
+                    railIndex: bestRailIdx, pointIndex: bestPointIdx,
+                    x: p.x, y: p.y, railAngle: railAngle,
+                    state: 'open', barAngle: -Math.PI / 2, lastSoundTime: 0
+                });
+            }
+        }
+
+        // --- 更新ループ ---
+        function update() {
+            frameCount++;
+            const now = Date.now();
+
+            // 踏切
+            crossings.forEach(c => {
+                let isTrainNear = false;
+                trains.forEach(t => {
+                    if (t.railIndex === c.railIndex) {
+                        const rail = rails[t.railIndex];
+                        const trainPos = rail.points[Math.floor(t.progress)];
+                        if(trainPos) {
+                            const dist = Math.hypot(trainPos.x - c.x, trainPos.y - c.y);
+                            if (dist < CROSSING_DETECT_DIST) isTrainNear = true;
+                        }
+                    }
+                });
+
+                if (isTrainNear) {
+                    c.state = 'closing';
+                    if (c.barAngle < 0) c.barAngle += 0.05;
+                    if (now - c.lastSoundTime > 800) { playSound('crossing'); c.lastSoundTime = now; }
+                } else {
+                    c.state = 'opening';
+                    if (c.barAngle > -Math.PI / 2) c.barAngle -= 0.05;
+                }
+            });
+
+            // 電車
+            trains.forEach((train, i) => {
+                const rail = rails[train.railIndex];
+                if (!rail) return;
+
+                // 速度制御（加減速）
+                if (train.currentSpeed < train.targetSpeed) train.currentSpeed = Math.min(train.currentSpeed + ACCEL, train.targetSpeed);
+                if (train.currentSpeed > train.targetSpeed) train.currentSpeed = Math.max(train.currentSpeed - DECEL, train.targetSpeed);
+
+                // --- 停止中のロジック ---
+                if (train.stopped) {
+                    train.targetSpeed = 0; // 目標速度ゼロ
+                    
+                    // まだ自分に乗ろうとしている客がいるか確認
+                    const passengersWaiting = people.filter(p => p.targetTrain === train).length;
+                    
+                    if (passengersWaiting > 0) {
+                        // まだ客がいるので待つ
+                        train.departureTimer = DEPARTURE_DELAY; 
+                    } else {
+                        // 客は全員乗った（または最初からいなかった）
+                        if (train.departureTimer > 0) {
+                            train.departureTimer--;
+                        } else {
+                            // 発車！
+                            train.stopped = false;
+                            train.targetSpeed = MAX_SPEED;
+                            playSound('depart');
+                            // 煙を出す
+                            for(let k=0; k<5; k++) addSmoke(rail.points[Math.floor(train.progress)], 10);
+                        }
+                    }
+                    return; // 位置更新はしない
+                } else {
+                    train.targetSpeed = MAX_SPEED;
+                }
+
+                // --- 衝突防止 (簡易) ---
+                let blocked = false;
+                trains.forEach((other, j) => {
+                    if (i === j) return;
+                    if (other.railIndex !== train.railIndex) return;
+                    let dist = other.progress - train.progress;
+                    if (rail.isLoop) {
+                        if (dist < -rail.points.length / 2) dist += rail.points.length;
+                        if (dist > rail.points.length / 2) dist -= rail.points.length;
+                    }
+                    const SAFE_DIST = 30; // index距離
+                    if (train.direction === other.direction) {
+                        if (train.direction > 0 && dist > 0 && dist < SAFE_DIST) blocked = true;
+                        if (train.direction < 0 && dist < 0 && dist > -SAFE_DIST) blocked = true;
+                    }
+                });
+
+                if (blocked) {
+                    train.targetSpeed = 0; // 前が詰まっているので減速
+                } else {
+                    train.targetSpeed = MAX_SPEED; // クリアなら加速
+                }
+
+                // 位置更新
+                train.progress += train.currentSpeed * train.direction;
+
+                // 煙エフェクト (動いている時だけランダムに)
+                if (Math.abs(train.currentSpeed) > 0.1 && Math.random() < 0.1) {
+                    const p = rail.points[Math.floor(train.progress)];
+                    if(p) addSmoke(p);
+                }
+
+                // ループ・往復処理
+                if (rail.isLoop) {
+                    if (train.progress >= rail.points.length) train.progress -= rail.points.length;
+                    else if (train.progress < 0) train.progress += rail.points.length;
+                } else {
+                    if (train.progress >= rail.points.length - 1) {
+                        train.progress = rail.points.length - 1; train.direction *= -1;
+                    } else if (train.progress <= 0) {
+                        train.progress = 0; train.direction *= -1;
+                    }
+                }
+
+                // 駅判定
+                const idx = Math.floor(train.progress);
+                const p1 = rail.points[idx];
+                if (!p1) return;
+
+                // 駅から十分離れたら（または発車直後なら）再停車可能にするフラグ管理が必要だが、
+                // ここでは「stoppedがfalse かつ departureTimerが0」なら判定する
+                if (!train.stopped && train.departureTimer <= 0) {
+                    for (let s of stations) {
+                        const centerX = s.x + s.w / 2;
+                        const centerY = s.y + s.h / 2;
+                        // 駅エリアに入った
+                        if (Math.hypot(p1.x - centerX, p1.y - centerY) < Math.max(s.w, s.h) / 2) {
+                            // クールダウン判定：駅の中心に近い場合のみトリガー
+                            // （通過中に何度も引っかからないように）
+                            // 簡易的に「速度がある程度ある」状態で入ったら止まる
+                            if (Math.abs(train.currentSpeed) > 0.5) {
+                                train.stopped = true;
+                                train.departureTimer = DEPARTURE_DELAY; // 初期値セット
+                                triggerBoarding(train, s.id);
+                                break; 
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 人の移動
+            people = people.filter(p => {
+                if (p.boarding && p.targetTrain) {
+                    const t = p.targetTrain;
+                    const rail = rails[t.railIndex];
+                    if(!rail || !trains.includes(t)) return false;
+
+                    const idx = Math.floor(t.progress);
+                    const dest = rail.points[idx];
+                    if(!dest) return false;
+
+                    const dx = dest.x - p.x;
+                    const dy = dest.y - p.y;
+                    const d = Math.hypot(dx, dy);
+
+                    if (d < 10) {
+                        t.passengers++;
+                        return false; // 乗車完了
+                    }
+                    // 吸い込まれる演出：加速する
+                    p.x += (dx / d) * BOARDING_SPEED;
+                    p.y += (dy / d) * BOARDING_SPEED;
+                }
+                return true;
+            });
+
+            // パーティクル更新
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.size += 0.2;
+                p.life--;
+                return p.life > 0;
+            });
+        }
+
+        function addSmoke(pos, count = 1) {
+            for(let i=0; i<count; i++) {
+                particles.push({
+                    x: pos.x, y: pos.y - 10,
+                    vx: (Math.random() - 0.5) * 1,
+                    vy: -Math.random() * 2 - 0.5,
+                    size: Math.random() * 3 + 2,
+                    life: 60,
+                    color: `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.3})`
+                });
+            }
+        }
+
+        function triggerBoarding(train, stationId) {
+            // その駅にいる人を検索
+            people.forEach(p => {
+                if (p.targetStationId === stationId && !p.boarding) {
+                    p.boarding = true;
+                    p.targetTrain = train;
+                }
+            });
+        }
+
+        // --- 描画 ---
+        function drawBackground() {
+            // 方眼紙風グリッド
+            ctx.fillStyle = '#fdfbf7';
+            ctx.fillRect(0, 0, width, height);
+            
+            ctx.beginPath();
+            ctx.strokeStyle = '#e5e7eb'; // 薄いグレー
+            ctx.lineWidth = 1;
+            const gridSize = 30;
+            for(let x=0; x<width; x+=gridSize) { ctx.moveTo(x, 0); ctx.lineTo(x, height); }
+            for(let y=0; y<height; y+=gridSize) { ctx.moveTo(0, y); ctx.lineTo(width, y); }
+            ctx.stroke();
+        }
+
+        function draw() {
+            drawBackground();
+
+            // 線路
+            ctx.lineCap = 'round';
+            rails.forEach(rail => {
+                if (rail.points.length < 2) return;
+                const pts = rail.points;
+                
+                // 枕木 (手書き風に少し乱す)
+                ctx.beginPath();
+                ctx.strokeStyle = '#92400e'; // 木の色
+                ctx.lineWidth = 3;
+                for (let i = 0; i < pts.length - 1; i += 5) {
+                    const p1 = pts[i];
+                    const p2 = pts[Math.min(i + 4, pts.length - 1)];
+                    const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                    const perpX = Math.cos(angle + Math.PI/2);
+                    const perpY = Math.sin(angle + Math.PI/2);
+                    const len = RAIL_WIDTH / 2 + 3;
+                    
+                    // 少し揺らぎを加える
+                    const jiggle = (i % 3 === 0) ? 1 : 0;
+                    ctx.moveTo(p1.x - perpX * len + jiggle, p1.y - perpY * len);
+                    ctx.lineTo(p1.x + perpX * len + jiggle, p1.y + perpY * len);
+                }
+                ctx.stroke();
+
+                // レール
+                ctx.strokeStyle = '#475569';
+                ctx.lineWidth = 2;
+                drawOffsetPath(pts, -RAIL_WIDTH/2);
+                drawOffsetPath(pts, RAIL_WIDTH/2);
+            });
+
+            // 踏切（床）
+            crossings.forEach(c => {
+                ctx.save();
+                ctx.translate(c.x, c.y);
+                ctx.rotate(c.railAngle);
+                ctx.fillStyle = '#fbbf24';
+                // 塗りつぶしを少しラフに
+                ctx.beginPath();
+                ctx.roundRect(-20, -30, 40, 60, 5);
+                ctx.fill();
+                ctx.fillStyle = '#1e293b';
+                for(let i=-30; i<30; i+=10) ctx.fillRect(-20, i, 40, 5);
+                ctx.restore();
+            });
+
+            // 駅
+            stations.forEach(s => {
+                if (s.points && s.points.length > 2) {
+                    ctx.beginPath();
+                    ctx.moveTo(s.points[0].x, s.points[0].y);
+                    for(let i=1; i<s.points.length; i++) ctx.lineTo(s.points[i].x, s.points[i].y);
+                    ctx.closePath();
+                    
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.fill();
+                    // 枠線をクレヨン風に二重描き
+                    ctx.strokeStyle = '#64748b';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = '#94a3b8';
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#475569';
+                    ctx.font = '12px "Comic Sans MS"';
+                    ctx.fillText("STATION", s.x + s.w/2 - 25, s.y + s.h/2);
+                }
+            });
+
+            // 人
+            people.forEach(p => {
+                ctx.fillStyle = p.color;
+                // 待ってる時ピョンピョン跳ねる
+                const bounce = p.boarding ? 0 : Math.sin(frameCount * 0.2 + p.x) * 2;
+                
+                ctx.beginPath();
+                ctx.arc(p.x, p.y - 10 + bounce, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath(); // 体
+                ctx.moveTo(p.x, p.y - 6 + bounce);
+                ctx.lineTo(p.x, p.y + 5 + bounce);
+                ctx.stroke();
+                // 足（走ってる風）
+                if (p.boarding) {
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y + 5);
+                    ctx.lineTo(p.x - 4, p.y + 10 + Math.sin(frameCount)*5);
+                    ctx.moveTo(p.x, p.y + 5);
+                    ctx.lineTo(p.x + 4, p.y + 10 - Math.sin(frameCount)*5);
+                    ctx.stroke();
+                } else {
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y + 5 + bounce);
+                    ctx.lineTo(p.x - 3, p.y + 12 + bounce);
+                    ctx.moveTo(p.x, p.y + 5 + bounce);
+                    ctx.lineTo(p.x + 3, p.y + 12 + bounce);
+                    ctx.stroke();
+                }
+            });
+
+            // 電車
+            trains.forEach(t => {
+                const rail = rails[t.railIndex];
+                if (!rail) return;
+                const idx = Math.floor(t.progress);
+                const p = rail.points[idx];
+                if (!p) return; 
+
+                // 角度
+                let lookAheadIdx = idx + 6 * t.direction; // 少し先を見る
+                if (rail.isLoop) {
+                    if (lookAheadIdx >= rail.points.length) lookAheadIdx -= rail.points.length;
+                    if (lookAheadIdx < 0) lookAheadIdx += rail.points.length;
+                } else {
+                    lookAheadIdx = Math.max(0, Math.min(lookAheadIdx, rail.points.length - 1));
+                }
+                const nextP = rail.points[lookAheadIdx];
+                const angle = Math.atan2(nextP.y - p.y, nextP.x - p.x);
+
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                
+                // 生き物のような動き
+                // 1. 走行中の揺れ (Wobble)
+                const wobble = Math.sin(frameCount * 0.3 + t.randomOffset) * 0.05 * (t.currentSpeed / MAX_SPEED);
+                ctx.rotate(angle + wobble);
+
+                // 2. 停車中の呼吸 (Breath)
+                let scaleX = 1, scaleY = 1;
+                if (t.stopped) {
+                    const breath = Math.sin(frameCount * 0.1) * 0.02;
+                    scaleX = 1 + breath;
+                    scaleY = 1 - breath;
+                }
+                ctx.scale(scaleX, scaleY);
+
+                if (t.shape && t.shape.length > 0) {
+                    ctx.beginPath();
+                    ctx.moveTo(t.shape[0].x, t.shape[0].y);
+                    for(let i=1; i<t.shape.length; i++) ctx.lineTo(t.shape[i].x, t.shape[i].y);
+                    ctx.closePath();
+                    
+                    ctx.fillStyle = t.color;
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)'; // 影線
+                    ctx.stroke();
+
+                    // 乗客数バッジ
+                    if (t.passengers > 0) {
+                        ctx.save();
+                        ctx.rotate(-angle - wobble); // 文字は水平に
+                        ctx.fillStyle = 'white';
+                        ctx.strokeStyle = '#333';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.arc(0, -15, 8, 0, Math.PI*2);
+                        ctx.fill();
+                        ctx.stroke();
+                        ctx.fillStyle = '#333';
+                        ctx.font = 'bold 10px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(t.passengers, 0, -14);
+                        ctx.restore();
+                    }
+                }
+                ctx.restore();
+            });
+
+            // 煙パーティクル
+            particles.forEach(p => {
+                ctx.beginPath();
+                ctx.fillStyle = p.color;
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            // 踏切（バー）
+            crossings.forEach(c => {
+                ctx.save();
+                ctx.translate(c.x, c.y);
+                ctx.rotate(c.railAngle); 
+                drawBarrier(ctx, -25, -20, c.barAngle);
+                drawBarrier(ctx, 25, 20, -c.barAngle + Math.PI);
+                ctx.restore();
+            });
+
+            // 描画中の線
+            if (isDrawing && currentStroke.length > 0) {
+                ctx.beginPath();
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 3;
+                if(currentMode === MODES.RAIL) ctx.strokeStyle = '#94a3b8';
+                
+                // 鉛筆風のギザギザ
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
+                ctx.moveTo(currentStroke[0].x, currentStroke[0].y);
+                for (let i = 1; i < currentStroke.length; i++) {
+                    ctx.lineTo(currentStroke[i].x, currentStroke[i].y);
+                }
+                ctx.stroke();
+            }
+        }
+
+        function drawBarrier(ctx, offsetX, offsetY, angle) {
+            ctx.save();
+            ctx.translate(offsetX, offsetY);
+            ctx.fillStyle = '#333'; ctx.fillRect(-2, -5, 4, 10); // 柱
+            ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill(); // 軸
+            ctx.rotate(angle);
+            ctx.fillStyle = '#eab308'; ctx.fillRect(0, -2, 40, 4); // バー
+            ctx.fillStyle = '#000'; ctx.fillRect(10, -2, 5, 4); ctx.fillRect(25, -2, 5, 4);
+            ctx.restore();
+        }
+
+        function drawOffsetPath(points, offset) {
+            ctx.beginPath();
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i+1];
+                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                const offX = Math.cos(angle + Math.PI/2) * offset;
+                const offY = Math.sin(angle + Math.PI/2) * offset;
+                if (i === 0) ctx.moveTo(p1.x + offX, p1.y + offY);
+                ctx.lineTo(p2.x + offX, p2.y + offY);
+            }
+            ctx.stroke();
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+        loop();
+
+    </script>
+</body>
+</html>
